@@ -1,4 +1,13 @@
+use polodb_core::bson::doc;
+use polodb_core::Database;
+use serde::{Deserialize, Serialize};
 use teloxide::{prelude::*, utils::command::BotCommands};
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Book {
+    title: String,
+    author: String,
+}
 
 #[tokio::main]
 async fn main() {
@@ -11,7 +20,10 @@ async fn main() {
 }
 
 #[derive(BotCommands, Clone)]
-#[command(rename_rule = "lowercase", description = "These commands are supported:")]
+#[command(
+    rename_rule = "lowercase",
+    description = "These commands are supported:"
+)]
 enum Command {
     #[command(description = "display this text.")]
     Help,
@@ -28,53 +40,45 @@ enum Command {
 }
 
 async fn answer(bot: Bot, msg: Message, cmd: Command) -> ResponseResult<()> {
+    let db = Database::open_file("test-polo.db").unwrap();
     match cmd {
-        Command::Help => bot.send_message(msg.chat.id, Command::descriptions().to_string()).await?,
+        Command::Help => {
+            bot.send_message(msg.chat.id, Command::descriptions().to_string())
+                .await?
+        }
         Command::Username(username) => {
-            //TODO save a username
-            println!("{}",msg.chat.id);
-            bot.send_message(msg.chat.id, format!("Your username is @{username}.")).await?
+            // chat_id.username <- username
+            // TODO add username to user
+            println!("{}", msg.chat.id);
+            bot.send_message(msg.chat.id, format!("Your username is @{username}."))
+                .await?
         }
         Command::Create => {
+            // chat_id.admin_chats <- game_id
+            // game.admin <- chat_id
+            // game.name <- name
             //TODO create a new game by name and give user an id to share
-            todo!()
+            bot.send_message(msg.chat.id, format!("You've created a game!"))
+                .await?
         }
         Command::Run(game_id) => {
+            // if game_id in chat_id.admin_chats => run game
             //TODO run a game by id
-            todo!()
+            bot.send_message(msg.chat.id, format!("You ran game"))
+                .await?
         }
         Command::Join(game_id) => {
+            // game_id.users <- chat_id
             //TODO join a game by id
-            todo!()
+            bot.send_message(msg.chat.id, format!("You've joined the game"))
+                .await?
         }
         Command::List => {
-            //TODO list all the games user participates in as admin or 
-            todo!()
+            //TODO list all the games user participates in as admin or user
+            bot.send_message(msg.chat.id, format!("Here's the list of all your games:"))
+                .await?
         }
     };
 
     Ok(())
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
