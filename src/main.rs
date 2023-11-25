@@ -1,6 +1,6 @@
 use lazy_static::lazy_static;
 
-use teloxide::{dispatching::dialogue::InMemStorage, prelude::*, types::ParseMode};
+use teloxide::{dispatching::dialogue::InMemStorage, prelude::*};
 
 use sled::Db;
 
