@@ -1,4 +1,4 @@
 /target
 /database.db
 shell.nix
-rustc-ice*
+*.txt
