@@ -248,8 +248,9 @@ async fn run_cmd(
         .admin
         .iter()
         .for_each(|elem| {
-            let game = Game::get(&params.db_connection, elem).unwrap();
-            message.push_str(format!("{game}").as_str());
+            if let Some(game) = Game::get(&params.db_connection, elem) {
+                message.push_str(format!("{game}").as_str());
+            }
         });
 
     bot.send_message(msg.chat.id, message)
@@ -347,8 +348,9 @@ async fn list_cmd(
                 _ => {
                     let mut message: String = String::from("Here are your pending games:\n\n");
                     for pending_game in user.pending {
-                        let game = Game::get(&params.db_connection, &pending_game).unwrap();
-                        message.push_str(format!("{}\n", game).as_str());
+                        if let Some(game) = Game::get(&params.db_connection, &pending_game) {
+                            message.push_str(format!("{}\n", game).as_str());
+                        }
                     }
                     bot.send_message(msg.chat.id, message.as_str())
                         .parse_mode(ParseMode::MarkdownV2)
@@ -363,8 +365,9 @@ async fn list_cmd(
                 _ => {
                     let mut message: String = String::from("Here are your user games:\n\n");
                     for user_game in user.user {
-                        let game = Game::get(&params.db_connection, &user_game).unwrap();
-                        message.push_str(format!("{}\n", game).as_str());
+                        if let Some(game) = Game::get(&params.db_connection, &user_game) {
+                            message.push_str(format!("{}\n", game).as_str());
+                        }
                     }
                     bot.send_message(msg.chat.id, message.as_str())
                         .parse_mode(ParseMode::MarkdownV2)
@@ -379,8 +382,9 @@ async fn list_cmd(
                 _ => {
                     let mut message: String = String::from("Here are your admin games:\n\n");
                     for admin_game in user.admin {
-                        let game = Game::get(&params.db_connection, &admin_game).unwrap();
-                        message.push_str(format!("{}\n", game).as_str());
+                        if let Some(game) = Game::get(&params.db_connection, &admin_game) {
+                            message.push_str(format!("{}\n", game).as_str());
+                        }
                     }
                     bot.send_message(msg.chat.id, message.as_str())
                         .parse_mode(ParseMode::MarkdownV2)
