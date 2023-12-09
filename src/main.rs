@@ -1,30 +1,16 @@
-use lazy_static::lazy_static;
-
 use teloxide::{dispatching::dialogue::InMemStorage, prelude::*};
 
-use sled::Db;
+mod errors;
 
 mod utils;
+
+mod runner;
+use runner::*;
 
 mod scheme;
 use scheme::{schema, State};
 
-static DB_PATH: &str = "./database.db";
-
-lazy_static! {
-    pub static ref DB_CONNECTION: Db = sled::open(DB_PATH).unwrap();
-}
-
-#[derive(Clone)]
-struct Parameters {
-    db_connection: Db,
-}
-
-impl Parameters {
-    fn new(db_connection: Db) -> Self {
-        Self { db_connection }
-    }
-}
+const DB_PATH: &str = "./database.db";
 
 #[tokio::main]
 async fn main() {
@@ -33,10 +19,10 @@ async fn main() {
 
     let bot = Bot::from_env();
 
-    let parameters = Parameters::new(DB_CONNECTION.clone());
+    let runner = Runner::new(DB_PATH).unwrap();
 
     Dispatcher::builder(bot, schema())
-        .dependencies(dptree::deps![parameters, InMemStorage::<State>::new()])
+        .dependencies(dptree::deps![runner.clone(), InMemStorage::<State>::new()])
         .enable_ctrlc_handler()
         .build()
         .dispatch()

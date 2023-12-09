@@ -1,14 +1,14 @@
 use teloxide::{
-    dispatching::{dialogue, dialogue::InMemStorage, UpdateHandler},
-    prelude::*,
-    types::ParseMode,
+    dispatching::{dialogue, dialogue::InMemStorage, UpdateFilterExt, UpdateHandler},
+    dptree,
+    payloads::SendMessageSetters,
+    prelude::{ChatId, Dialogue, Requester},
+    types::{Message, ParseMode, Update},
     utils::command::BotCommands,
+    Bot,
 };
 
-use crate::{
-    utils::{UserId, *},
-    Parameters,
-};
+use crate::{runner::*, utils::*};
 
 #[derive(Clone, Default)]
 pub enum State {
@@ -164,13 +164,8 @@ pub fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'stat
     dialogue::enter::<Update, InMemStorage<State>, State, _>().branch(message_handler)
 }
 
-async fn start_cmd(
-    bot: Bot,
-    dialogue: MyDialogue,
-    msg: Message,
-    params: Parameters,
-) -> HandlerResult {
-    match User::get(&params.db_connection, &UserId::from(msg.chat.id)) {
+async fn start_cmd(bot: Bot, dialogue: MyDialogue, msg: Message, runner: Runner) -> HandlerResult {
+    match runner.get_user(&UserId::from(msg.chat.id)) {
         Some(_) => {
             bot.send_message(
                 msg.chat.id,
@@ -231,27 +226,30 @@ async fn create_cmd(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResu
     Ok(())
 }
 
-async fn run_cmd(
-    bot: Bot,
-    dialogue: MyDialogue,
-    msg: Message,
-    params: Parameters,
-) -> HandlerResult {
+async fn run_cmd(bot: Bot, dialogue: MyDialogue, msg: Message, runner: Runner) -> HandlerResult {
     let mut message = String::from(
         "Please enter id of the game you want to run\n\
         You can /cancel\n\n\
-        Here are avaliable options:\n",
+        Here are available options:\n",
     );
 
-    User::get(&params.db_connection, &UserId::from(msg.chat.id))
-        .unwrap()
-        .admin
-        .iter()
-        .for_each(|elem| {
-            if let Some(game) = Game::get(&params.db_connection, elem) {
-                message.push_str(format!("{game}").as_str());
-            }
-        });
+    match runner.get_user(&UserId::from(msg.chat.id)) {
+        Some(user) => {
+            user.admin_games
+                .iter()
+                .for_each(|elem| match runner.get_game(elem) {
+                    Some(game) => {
+                        message.push_str(format!("{game}").as_str());
+                    }
+                    None => {
+                        todo!()
+                    }
+                });
+        }
+        None => {
+            todo!()
+        }
+    }
 
     bot.send_message(msg.chat.id, message)
         .parse_mode(ParseMode::MarkdownV2)
@@ -326,13 +324,8 @@ async fn remove_cmd(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResu
     Ok(())
 }
 
-async fn list_cmd(
-    bot: Bot,
-    _dialogue: MyDialogue,
-    msg: Message,
-    params: Parameters,
-) -> HandlerResult {
-    match User::get(&params.db_connection, &UserId::from(msg.chat.id)) {
+async fn list_cmd(bot: Bot, _dialogue: MyDialogue, msg: Message, runner: Runner) -> HandlerResult {
+    match runner.get_user(&UserId::from(msg.chat.id)) {
         Some(user) => {
             let username = user.username;
             bot.send_message(
@@ -340,16 +333,21 @@ async fn list_cmd(
                 format!("Hi, {username} Here's list of all your games:"),
             )
             .await?;
-            match user.pending.len() {
+            match user.pending_games.len() {
                 0 => {
                     bot.send_message(msg.chat.id, "There was no pending games found.")
                         .await?;
                 }
                 _ => {
                     let mut message: String = String::from("Here are your pending games:\n\n");
-                    for pending_game in user.pending {
-                        if let Some(game) = Game::get(&params.db_connection, &pending_game) {
-                            message.push_str(format!("{}\n", game).as_str());
+                    for pending_game in user.pending_games {
+                        match runner.get_game(&pending_game) {
+                            Some(game) => {
+                                message.push_str(format!("{}\n", game).as_str());
+                            }
+                            None => {
+                                todo!()
+                            }
                         }
                     }
                     bot.send_message(msg.chat.id, message.as_str())
@@ -357,16 +355,21 @@ async fn list_cmd(
                         .await?;
                 }
             }
-            match user.user.len() {
+            match user.active_games.len() {
                 0 => {
-                    bot.send_message(msg.chat.id, "There was no user games found.")
+                    bot.send_message(msg.chat.id, "There was no user active found.")
                         .await?;
                 }
                 _ => {
-                    let mut message: String = String::from("Here are your user games:\n\n");
-                    for user_game in user.user {
-                        if let Some(game) = Game::get(&params.db_connection, &user_game) {
-                            message.push_str(format!("{}\n", game).as_str());
+                    let mut message: String = String::from("Here are your active games:\n\n");
+                    for active_game in user.active_games {
+                        match runner.get_game(&active_game) {
+                            Some(game) => {
+                                message.push_str(format!("{}\n", game).as_str());
+                            }
+                            None => {
+                                todo!()
+                            }
                         }
                     }
                     bot.send_message(msg.chat.id, message.as_str())
@@ -374,16 +377,21 @@ async fn list_cmd(
                         .await?;
                 }
             }
-            match user.admin.len() {
+            match user.admin_games.len() {
                 0 => {
                     bot.send_message(msg.chat.id, "There was no admin games found.")
                         .await?;
                 }
                 _ => {
                     let mut message: String = String::from("Here are your admin games:\n\n");
-                    for admin_game in user.admin {
-                        if let Some(game) = Game::get(&params.db_connection, &admin_game) {
-                            message.push_str(format!("{}\n", game).as_str());
+                    for admin_game in user.admin_games {
+                        match runner.get_game(&admin_game) {
+                            Some(game) => {
+                                message.push_str(format!("{}\n", game).as_str());
+                            }
+                            None => {
+                                todo!()
+                            }
                         }
                     }
                     bot.send_message(msg.chat.id, message.as_str())
@@ -453,11 +461,11 @@ async fn register(
     dialogue: MyDialogue,
     msg: Message,
     _state: RegisterState,
-    params: Parameters,
+    runner: Runner,
 ) -> HandlerResult {
     match msg.text().map(ToOwned::to_owned) {
         Some(name) => {
-            User::register(&params.db_connection, msg.chat.id.into(), name.clone());
+            runner.new_user(msg.chat.id.into(), name.clone());
             bot.send_message(
                 msg.chat.id,
                 format! {"Thanks for completing the registration, {name}.\n\
@@ -482,15 +490,11 @@ async fn username(
     dialogue: MyDialogue,
     msg: Message,
     _state: UsernameState,
-    params: Parameters,
+    runner: Runner,
 ) -> HandlerResult {
     match msg.text().map(ToOwned::to_owned) {
         Some(name) => {
-            User::change_username(
-                &params.db_connection,
-                UserId::from(msg.chat.id),
-                name.clone(),
-            );
+            runner.change_username(&UserId::from(msg.chat.id), name.clone());
 
             bot.send_message(
                 msg.chat.id,
@@ -514,29 +518,31 @@ async fn create(
     dialogue: MyDialogue,
     msg: Message,
     _state: CreateState,
-    params: Parameters,
+    runner: Runner,
 ) -> HandlerResult {
     match msg.text().map(ToOwned::to_owned) {
-        Some(name) => {
-            let game = Game::new(&params.db_connection, UserId::from(msg.chat.id), name);
-
-            let game_id = game.id.0;
-            let game_name = game.name;
-            bot.send_message(
+        Some(game_name) => match runner.new_game(UserId::from(msg.chat.id), game_name.clone()) {
+            Ok(game_id) => {
+                let id = game_id.0;
+                bot.send_message(
+                    msg.chat.id,
+                    format! {"You've created game named {game_name} with game id `{id}`"},
+                )
+                .parse_mode(ParseMode::MarkdownV2)
+                .await?;
+                bot.send_message(
                 msg.chat.id,
-                format! {"You've created game named {game_name} with game id `{game_id}`"},
-            )
-            .parse_mode(ParseMode::MarkdownV2)
-            .await?;
-            bot.send_message(
-                msg.chat.id,
-                format! {"To join game {game_name} you have to use /join after registration and use `{game_id}`\\."},
+                format! {"To join game {game_name} you have to use /join after registration and use `{id}`\\."},
             )
             .parse_mode(ParseMode::MarkdownV2)
             .await?;
 
-            dialogue.exit().await?;
-        }
+                dialogue.exit().await?;
+            }
+            Err(_) => {
+                todo!()
+            }
+        },
         None => {
             bot.send_message(msg.chat.id, "Please use /help").await?;
             dialogue.exit().await?;
@@ -551,7 +557,7 @@ async fn run(
     dialogue: MyDialogue,
     msg: Message,
     state: RunState,
-    params: Parameters,
+    runner: Runner,
 ) -> HandlerResult {
     match state {
         RunState::GetId => match msg.text().map(ToOwned::to_owned) {
@@ -559,14 +565,12 @@ async fn run(
                 let game_id = GameId::from(game_id);
                 let user_id = UserId::from(msg.chat.id);
 
-                match params.db_connection.get(game_id.to_key()).unwrap() {
-                    Some(game) => {
-                        let game = Game::from(game);
-                        match game.admin == user_id {
-                            true => {
-                                let id = game_id.0;
-                                let name = game.name;
-                                bot.send_message(
+                match runner.get_game(&game_id) {
+                    Some(game) => match game.admin == user_id {
+                        true => {
+                            let id = game_id.0;
+                            let name = game.name;
+                            bot.send_message(
                                     msg.chat.id,
                                     format! {"Please confirm that you're going to run game `{name}`\n\
                                         This action is irreversible\n\
@@ -575,22 +579,21 @@ async fn run(
                                         You can /cancel"},
                                 ).parse_mode(ParseMode::MarkdownV2)
                                 .await?;
-                                dialogue
-                                    .update(State::Run {
-                                        state: RunState::Confirm { game_id },
-                                    })
-                                    .await?;
-                            }
-                            false => {
-                                bot.send_message(
-                                    msg.chat.id,
-                                    "It looks like you're not admin of this game",
-                                )
+                            dialogue
+                                .update(State::Run {
+                                    state: RunState::Confirm { game_id },
+                                })
                                 .await?;
-                                dialogue.exit().await?;
-                            }
                         }
-                    }
+                        false => {
+                            bot.send_message(
+                                msg.chat.id,
+                                "It looks like you're not admin of this game",
+                            )
+                            .await?;
+                            dialogue.exit().await?;
+                        }
+                    },
                     None => {
                         bot.send_message(msg.chat.id, "It looks like there's no such game")
                             .await?;
@@ -616,7 +619,11 @@ async fn run(
                         )
                         .await?;
 
-                        Game::run(&params.db_connection, game_id, &bot).await?;
+                        let messages = runner.run_game(game_id).unwrap();
+
+                        for (recipient, message) in messages {
+                            bot.send_message(ChatId(recipient.0), message).await?;
+                        }
 
                         dialogue.exit().await?;
                     }
@@ -640,31 +647,33 @@ async fn join(
     dialogue: MyDialogue,
     msg: Message,
     _state: JoinState,
-    params: Parameters,
+    runner: Runner,
 ) -> HandlerResult {
     match msg.text().map(ToOwned::to_owned) {
         Some(game_id) => {
             let game_id = GameId::from(game_id);
             let user_id = UserId::from(msg.chat.id);
 
-            if params.db_connection.contains_key(game_id.to_key()).unwrap() {
-                User::add_pending(&params.db_connection, user_id, game_id);
-                Game::add_pending(&params.db_connection, game_id, user_id);
+            match runner.get_game(&game_id) {
+                Some(_) => {
+                    runner.add_user_to_pending(&user_id, &game_id);
 
-                bot.send_message(
-                    msg.chat.id,
-                    "You're now in the waiting list to this game.\n\
+                    bot.send_message(
+                        msg.chat.id,
+                        "You're now in the waiting list to this game.\n\
                     Please wait until game administrator confirms you.\n\
                     You can /leave to leave game and /list to list all your games.",
-                )
-                .await?;
-            } else {
-                bot.send_message(
-                    msg.chat.id,
-                    "It lloks like there's no such game.\n\
+                    )
+                    .await?;
+                }
+                None => {
+                    bot.send_message(
+                        msg.chat.id,
+                        "It looks like there's no such game.\n\
                     Please use /help",
-                )
-                .await?;
+                    )
+                    .await?;
+                }
             }
 
             dialogue.exit().await?;
@@ -683,19 +692,14 @@ async fn leave(
     dialogue: MyDialogue,
     msg: Message,
     _state: LeaveState,
-    params: Parameters,
+    runner: Runner,
 ) -> HandlerResult {
     match msg.text().map(ToOwned::to_owned) {
         Some(game_id) => {
             let user_id = UserId::from(msg.chat.id);
             let game_id = GameId::from(game_id);
 
-            // let game = Game::get(&params.db_connection, &game_id).unwrap();
-
-            if params.db_connection.contains_key(game_id.to_key()).unwrap() {
-                User::remove(&params.db_connection, user_id, game_id);
-                Game::remove(&params.db_connection, game_id, user_id);
-            }
+            runner.remove_user_from_game(&user_id, &game_id).unwrap();
 
             bot.send_message(msg.chat.id, "You've successfully left this game.")
                 .await?;
@@ -715,7 +719,7 @@ async fn accept(
     dialogue: MyDialogue,
     msg: Message,
     state: AcceptState,
-    params: Parameters,
+    runner: Runner,
 ) -> HandlerResult {
     match state {
         AcceptState::GetGameId => match msg.text().map(ToOwned::to_owned) {
@@ -725,11 +729,12 @@ async fn accept(
 
                 let mut message = String::from("Here are all pendling users:\n");
 
-                Game::get(&params.db_connection, &game_id)
+                runner
+                    .get_game(&game_id)
                     .unwrap()
-                    .pending
+                    .pending_users
                     .iter()
-                    .map(|id| User::get(&params.db_connection, id).unwrap())
+                    .map(|id| runner.get_user(id).unwrap())
                     .for_each(|user| message.push_str(user.to_string().as_str()));
 
                 bot.send_message(msg.chat.id, message)
@@ -754,10 +759,9 @@ async fn accept(
             Some(user_id) => {
                 let user_id = UserId::from(user_id);
 
-                if params.db_connection.contains_key(game_id.to_key()).unwrap() {
-                    User::promote(&params.db_connection, user_id, game_id);
-                    Game::promote(&params.db_connection, game_id, user_id);
-                }
+                runner
+                    .promote_user_from_pending_to_active(&user_id, &game_id)
+                    .unwrap();
 
                 bot.send_message(msg.chat.id, "You've accepted this user to the game.")
                     .await?;
@@ -778,7 +782,7 @@ async fn remove(
     dialogue: MyDialogue,
     msg: Message,
     state: RemoveState,
-    params: Parameters,
+    runner: Runner,
 ) -> HandlerResult {
     match state {
         RemoveState::GetGameId => match msg.text().map(ToOwned::to_owned) {
@@ -790,18 +794,18 @@ async fn remove(
 
                 message.push_str("Pending users:\n\n");
 
-                let game = Game::get(&params.db_connection, &game_id).unwrap();
+                let game = runner.get_game(&game_id).unwrap();
 
-                game.pending
+                game.pending_users
                     .iter()
-                    .map(|id| User::get(&params.db_connection, id).unwrap())
+                    .map(|id| runner.get_user(id).unwrap())
                     .for_each(|user| message.push_str(user.to_string().as_str()));
 
                 message.push_str("Active users:\n\n");
 
-                game.users
+                game.active_users
                     .iter()
-                    .map(|id| User::get(&params.db_connection, id).unwrap())
+                    .map(|id| runner.get_user(id).unwrap())
                     .for_each(|user| message.push_str(user.to_string().as_str()));
 
                 bot.send_message(msg.chat.id, message)
@@ -826,10 +830,7 @@ async fn remove(
             Some(user_id) => {
                 let user_id = UserId::from(user_id);
 
-                if params.db_connection.contains_key(game_id.to_key()).unwrap() {
-                    User::remove(&params.db_connection, user_id, game_id);
-                    Game::remove(&params.db_connection, game_id, user_id);
-                }
+                runner.remove_user_from_game(&user_id, &game_id);
 
                 bot.send_message(msg.chat.id, "You've removed this user from the game.")
                     .await?;
@@ -850,12 +851,12 @@ async fn info(
     dialogue: MyDialogue,
     msg: Message,
     _state: InfoState,
-    params: Parameters,
+    runner: Runner,
 ) -> HandlerResult {
     match msg.text().map(ToOwned::to_owned) {
         Some(game_id) => {
             let game_id = GameId::from(game_id);
-            let game = Game::get(&params.db_connection, &game_id).unwrap();
+            let game = runner.get_game(&game_id).unwrap();
 
             let mut message = String::from("Here are info about your game:\n\n");
 
@@ -867,16 +868,16 @@ async fn info(
 
             message.push_str("Active users:\n");
 
-            game.users
+            game.active_users
                 .iter()
-                .map(|id| User::get(&params.db_connection, id).unwrap())
+                .map(|id| runner.get_user(id).unwrap())
                 .for_each(|user| message.push_str(user.to_string().as_str()));
 
             message.push_str("\nPending users:\n");
 
-            game.pending
+            game.pending_users
                 .iter()
-                .map(|id| User::get(&params.db_connection, id).unwrap())
+                .map(|id| runner.get_user(id).unwrap())
                 .for_each(|user| message.push_str(user.to_string().as_str()));
 
             bot.send_message(msg.chat.id, message)
